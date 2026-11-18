@@ -1,0 +1,91 @@
+name: Verify rendered site then deploy Pages
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: ruby/setup-ruby@v1.328.0
+        with:
+          ruby-version: '3.1'
+          bundler-cache: true
+      - run: npm install -g uglify-js
+      - run: uglifyjs assets/js/plugins/jquery.greedy-navigation.js assets/js/_main.js assets/js/theme.js -c -m -o assets/js/main.min.js
+      - name: Build site
+        run: bundle exec jekyll build --baseurl "/LJT-Homepage"
+        env:
+          JEKYLL_ENV: production
+      - name: Verify rendered content
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          titles = [
+            'SynLogic: Synthesizing Verifiable Reasoning Data at Scale for Learning Logical Reasoning and Beyond',
+            'On the Perception Bottleneck of VLMs for Chart Understanding',
+            'On the Universal Truthfulness Hyperplane Inside LLMs',
+            'In-Context Sharpness as Alerts: An Inner Representation Perspective for Hallucination Mitigation',
+            'C-Eval: A Multi-Level Multi-Discipline Chinese Evaluation Suite for Foundation Models',
+            'Composing Parameter-Efficient Modules with Arithmetic Operations',
+          ]
+          checks = [
+            'Junteng Liu', 'First-year PhD candidate at HKUST NLP Group',
+            'Shanghai Jiao Tong University', 'MINIMAX', 'Tencent WXG', 'Shanghai AI Lab',
+            'Professor Junxian He', 'Zifei Shan', 'Yu Cheng', 'Zhiyuan Honor Scholarship',
+            'LLM Reasoning and Reinforcement Learning',
+            'Hallucination in Vision-Language Models (VLM)',
+            'LLM Truthfulness and Interpretability',
+            'jliugi@connect.ust.hk', 'Vicent0205', 'junteng88716710',
+            'tbK9jl4AAAAJ'
+          ]
+          for rel in ['index.html', 'publications/index.html', 'cv/index.html']:
+            text = Path('_site', rel).read_text()
+            print(f'== {rel}: {len(text)} chars ==')
+            missing_titles = [t for t in titles if t not in text]
+            print('missing titles:', missing_titles)
+            assert not missing_titles, (rel, missing_titles)
+            if rel == 'index.html':
+              missing = [c for c in checks if c not in text]
+              print('missing homepage checks:', missing)
+              assert not missing, missing
+              assert 'Paper Title Number' not in text
+              assert 'Academic Pages is a ready-to-fork' not in text
+            if rel.startswith('publications'):
+              positions = [(text.find(t), t[:45]) for t in titles]
+              print('title order/positions:', positions)
+              assert [p[0] for p in positions] == sorted(p[0] for p in positions)
+              print('publication links:', __import__('re').findall(r'href="([^"]*/publication/[^"]+)"', text))
+              print('headings:', __import__('re').findall(r'<h2>(.*?)</h2>', text))
+              assert text.count('archive__item-title') == 6
+              assert 'Paper Title Number' not in text
+          print('ALL RENDERED CONTENT CHECKS PASSED')
+          PY
+      - name: Try configure Pages
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@v6.0.0
+        with:
+          enablement: true
+      - name: Build final site
+        if: steps.pages.outcome == 'success'
+        run: bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}"
+        env:
+          JEKYLL_ENV: production
+      - name: Upload artifact
+        if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v5.0.0
+  deploy:
+    if: false
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - run: echo "Pages enablement is required outside this workflow."
